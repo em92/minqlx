@@ -16,7 +16,14 @@
 # You should have received a copy of the GNU General Public License
 # along with minqlx. If not, see <http://www.gnu.org/licenses/>.
 
-import minqlx
+from collections.abc import Mapping
+
+try:
+    import minqlx
+except ImportError:
+    # used for redis-py related regression tests
+    minqlx = None
+
 import redis
 
 # ====================================================================
@@ -313,3 +320,57 @@ class Redis(AbstractDatabase):
             if Redis._pool:
                 Redis._pool.disconnect()
                 Redis._pool = None
+
+    if redis.VERSION >= (3,):
+        # https://github.com/redis/redis-py/blob/2.10.6/redis/client.py
+        # https://github.com/redis/redis-py/blob/3.5.3/redis/client.py
+
+        def lrem(self, name, value, count):
+            return self.r.lrem(name, count, value)
+
+        def mset(self, *args, **kwargs):
+            mapping = {}
+            if args:
+                if len(args) != 1 or not isinstance(args[0], dict):
+                    raise redis.RedisError("MSET requires **kwargs or a single dict arg")
+                mapping.update(args[0])
+
+            if kwargs:
+                mapping.update(kwargs)
+
+            return self.r.mset(mapping)
+
+        def msetnx(self, *args, **kwargs):
+            mapping = {}
+            if args:
+                if len(args) != 1 or not isinstance(args[0], dict):
+                    raise redis.RedisError("MSETNX requires **kwargs or a single dict arg")
+                mapping.update(args[0])
+
+            if kwargs:
+                mapping.update(kwargs)
+
+            return self.r.msetnx(mapping)
+
+        def setex(self, name, time, value):
+            return self.r.setex(name, value, time)
+
+        def zadd(self, name, *args, **kwargs):
+            # redis v3's usage
+            if isinstance(args[0], Mapping):
+                return self.r.zadd(name, *args, **kwargs)
+
+            # copy from redis v2
+            pieces = []
+            if args:
+                if len(args) % 2 != 0:
+                    raise redis.RedisError("ZADD requires an equal number of values and scores")
+                pieces.extend(reversed(args))
+            for pair in iteritems(kwargs):
+                pieces.append(pair[1])
+                pieces.append(pair[0])
+
+            return self.r.execute_command('ZADD', name, *pieces)
+
+        def zincrby(self, name, value, amount=1):
+            return self.r.zincrby(name, amount, value)
